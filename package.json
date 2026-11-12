@@ -4,6 +4,6 @@
   "private": true,
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+"start": "node --env-file=.env bot.js"
   }
 }
