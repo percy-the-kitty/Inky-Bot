@@ -1,3 +1,4 @@
+
 'use strict';
 
 const fs = require('node:fs');
@@ -82,7 +83,7 @@ async function init() {
 }
 
 function isInkyCalled(message) {
-  return /\binky(?:\s+the\s+kitty)?\b/i.test(message);
+  return /\binky(?:\s+the\s+kitty)?\b|@InkyTheKitty_0823/i.test(message);
 }
 
 async function poll() {
