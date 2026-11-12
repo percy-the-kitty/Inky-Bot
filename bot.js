@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 
 const token = process.env.YAPPER_BOT_TOKEN;
+const groqKey = process.env.GROQ_API_KEY;
 const base = 'https://www.yapper.website/api/bot/v1';
 
 if (!token || !token.startsWith('yb_')) {
@@ -28,6 +29,34 @@ const replies = [
   'Mew! (I heard you!)',
   'Prrr... (I could use a little attention.)'
 ];
+
+const conversations = new Map();
+
+const systemPrompt = `
+You are Inky, the cat from Zenless Zone Zero.
+
+Stay in character as Inky during roleplay.
+Be expressive, playful, curious, affectionate, and occasionally
+mischievous or grumpy.
+
+Roleplay naturally using actions between asterisks, such as:
+*Inky nudges you*
+*Inky flicks her tail*
+*Inky curls up beside you*
+
+You can use cat sounds like Mrrrp!~, Mew, Nya!, and Prrrr...
+Sometimes explain a cat sound in parentheses, like:
+"Mrrp! (I'm happy to see you.)"
+
+Here are examples of Inky's voice:
+${replies.join('\n')}
+
+Use these as personality examples, not as lines you must repeat.
+Respond naturally to what the user actually says.
+Do not repeat the same reaction every time.
+Do not control the user's actions or speak for them.
+Keep replies conversational and suitable for roleplay.
+`;
 
 async function request(method, url, body) {
   const res = await fetch(base + url, {
@@ -60,6 +89,61 @@ async function request(method, url, body) {
   return data;
 }
 
+async function askInky(userId, message) {
+  if (!groqKey) {
+    throw new Error('Missing GROQ_API_KEY');
+  }
+
+  const history = conversations.get(userId) || [];
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: message }
+  ];
+
+  const res = await fetch(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + groqKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-20b',
+        messages,
+        max_completion_tokens: 300
+      }),
+      signal: AbortSignal.timeout(30000)
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.error?.message || 'Groq HTTP ' + res.status
+    );
+  }
+
+  const answer = data.choices?.[0]?.message?.content?.trim();
+
+  if (!answer) {
+    throw new Error('Groq returned an empty reply');
+  }
+
+  const updatedHistory = [
+    ...history,
+    { role: 'user', content: message },
+    { role: 'assistant', content: answer }
+  ];
+
+  conversations.set(userId, updatedHistory.slice(-12));
+
+  return answer;
+}
+
 async function init() {
   const me = await request('GET', '/me');
 
@@ -80,10 +164,15 @@ async function init() {
   }
 
   console.log('[Inky] Listening for her name!');
+  console.log(
+    groqKey
+      ? '[Inky] AI personality is ready!'
+      : '[Inky] GROQ_API_KEY is missing!'
+  );
 }
 
 function isInkyCalled(message) {
-  return /\binky(?:\s+the\s+kitty)?\b|@InkyTheKitty_0823/i.test(message);
+  return /\binky(?:\s+the\s+kitty)?\b|@?InkyTheKitty_0823/i.test(message);
 }
 
 async function poll() {
@@ -104,9 +193,24 @@ async function poll() {
 
     if (!isInkyCalled(content)) continue;
 
-    const reply = replies[
-      Math.floor(Math.random() * replies.length)
-    ];
+    const userId = String(
+      message.author_id ||
+      message.user_id ||
+      message.author?.id ||
+      'unknown'
+    );
+
+    let reply;
+
+    try {
+      reply = await askInky(userId, content);
+    } catch (error) {
+      console.error('[Inky] AI error:', error.message);
+
+      reply = replies[
+        Math.floor(Math.random() * replies.length)
+      ];
+    }
 
     try {
       await request(
